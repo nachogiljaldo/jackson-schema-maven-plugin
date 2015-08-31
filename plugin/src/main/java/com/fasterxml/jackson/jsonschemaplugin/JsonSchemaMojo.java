@@ -38,6 +38,18 @@ public class JsonSchemaMojo extends AbstractMojo {
     File outputSchema;
 
     /**
+     * Location of the result schema.
+     */
+    @Parameter(defaultValue = "${project.build.directory}/", property = "schemaDirectory")
+    File outputDirectory;
+
+    /**
+     * Location of the result schema.
+     */
+    @Parameter(defaultValue = "false", property = "oneFilePerSchema")
+    boolean oneFilePerSchema;
+
+    /**
      * Name a class that implements {@link com.fasterxml.jackson.jsonschemaplugin.api.JsonSchemaObjectMapperFactory}.
      * This class path must be in the compile classpath or the plugin class loader (the dependencies declared
      * in the pom <strong>for the plugin</strong>). The plugin will
@@ -75,22 +87,37 @@ public class JsonSchemaMojo extends AbstractMojo {
         }
 
         ObjectMapper m = getObjectMapper(compileClassLoader);
-        SchemaFactoryWrapper visitor = new SchemaFactoryWrapper();
         try {
             for (Class<?> clazz : getClassesToProcess(compileClassLoader)) {
+                SchemaFactoryWrapper visitor = new SchemaFactoryWrapper();
                 m.acceptJsonFormatVisitor(m.constructType(clazz), visitor);
+                JsonSchema jsonSchema = visitor.finalSchema();
+                try {
+                    File schemaFile;
+                    if (oneFilePerSchema) {
+                        schemaFile = generateSchemaFile(clazz);
+                    } else {
+                        schemaFile = outputSchema;
+                    }
+                    m.writerWithDefaultPrettyPrinter().writeValue(schemaFile, jsonSchema);
+                } catch (IOException e) {
+                    throw new MojoExecutionException("Failed to write result schema.", e);
+                }
             }
         } catch (IOException e) {
             throw new MojoFailureException("Failed to construct compile classpath class loader.", e);
         } catch (DependencyResolutionRequiredException e) {
             throw new MojoFailureException("Failed to resolve dependencies.", e);
         }
-        JsonSchema jsonSchema = visitor.finalSchema();
-        try {
-            m.writerWithDefaultPrettyPrinter().writeValue(outputSchema, jsonSchema);
-        } catch (IOException e) {
-            throw new MojoExecutionException("Failed to write result schema.", e);
+    }
+
+    private File generateSchemaFile(final Class<?> clazz) throws MojoExecutionException {
+        if (!outputDirectory.exists()) {
+            if (!outputDirectory.mkdir()) {
+                throw new MojoExecutionException("Could not create outputDirectory " + outputDirectory.getAbsolutePath());
+            }
         }
+        return new File(outputDirectory.getAbsolutePath() + "/" + clazz.getSimpleName() + ".json");
     }
 
     @SuppressWarnings("unchecked")
